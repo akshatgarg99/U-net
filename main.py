@@ -144,6 +144,22 @@ class ImageSegmentation(object):
             self.model.train()
             self.scheduler.step(epoch_loss)
 
+    def predict(self):
+        for i, batch in enumerate(self.valid_dataloader):
+            images, mask_target = batch
+
+            batch_preds = torch.sigmoid(self.model(images.to(self.device)))
+            batch_preds = batch_preds.detach().cpu().numpy()
+            for pre in range(16):
+                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 15))
+                fig.suptitle('predicted_mask  <--------------->  original_mask')
+                ax1.imshow(np.squeeze(batch_preds[pre]), cmap='gray')
+                ax2.imshow(np.squeeze(mask_target[pre]), cmap='gray')
+                plt.show()
+            break
+        return
+
+
 
 df = pd.read_csv('/content/gdrive/MyDrive/Project_Data/Carvan/train_masks.csv.zip')
 img_fol = '/content/gdrive/MyDrive/Project_Data/Carvan/train-128'
