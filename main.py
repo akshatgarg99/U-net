@@ -11,6 +11,38 @@ import os
 import time
 import random
 
+'''
+#for loading the data from kaggle to colab to run over GPUs,
+#run the following
+
+! pip install -q kaggle
+
+from google.colab import files
+files.upload()  # upload the token file downloaded from setting in your kaggle settings.
+
+! mkdir ~/.kaggle
+! cp kaggle.json ~/.kaggle/
+! chmod 600 ~/.kaggle/kaggle.json
+! kaggle datasets list
+! kaggle competitions download -c 'Carvana-Image-Masking-Challenge'
+from google.colab import drive
+drive.mount('/content/gdrive')
+
+# select the file path accordingly 
+! mkdir /content/gdrive/MyDrive/Project_Data/Carvan/test_hq
+! mkdir /content/gdrive/MyDrive/Project_Data/Carvan/train_hq
+! mkdir /content/gdrive/MyDrive/Project_Data/Carvan/train_masks
+
+! unzip train_hq.zip -d /content/gdrive/MyDrive/Project_Data/Carvan/train_hq
+! rm train_hq.zip
+
+! unzip train_masks.zip -d /content/gdrive/MyDrive/Project_Data/Carvan/train_masks
+! rm train_masks.zip
+
+! unzip test_hq.zip -d /content/gdrive/MyDrive/Project_Data/Carvan/test_hq
+! rm test_hq.zip
+'''
+
 
 def get_transform(phase):
     list_trans = []
@@ -49,7 +81,6 @@ class CarDataset(torch.utils.data.Dataset):
     def __init__(self, df, img_fol, mask_fol, phase):
         self.fname = df['img'].values.tolist()
         random.shuffle(self.fname)
-
         self.img_fol = img_fol
         self.mask_fol = mask_fol
         self.phase = phase
@@ -62,11 +93,8 @@ class CarDataset(torch.utils.data.Dataset):
         name = self.fname[idx]
         img_name_path = os.path.join(self.img_fol, name)
         mask_name_path = os.path.join(self.mask_fol, name)[:-4] + '_mask.png'
-        # mask_name_path=img_name_path.split('.')[0].replace('train-128','train_masks-128')+'_mask.png'
-
         img = cv2.imread(img_name_path)
         mask = cv2.imread(mask_name_path, cv2.IMREAD_GRAYSCALE)
-
         augmentation = self.transform(image=img, mask=mask)
         img_aug = augmentation['image']
         mask_aug = augmentation['mask']
@@ -80,7 +108,7 @@ class ImageSegmentation(object):
         self.img_fol = img_fol
         self.mask_fol = mask_fol
         self.phases = ['train', 'valid']
-        self.batch_size = {'train': 256, 'valid': 32}
+        self.batch_size = {'train': 16, 'valid': 16}
         self.train_dataloader, self.valid_dataloader = CarDataloader(df, img_fol, mask_fol, self.batch_size)
         torch.set_default_tensor_type("torch.cuda.FloatTensor")
         self.device = torch.device("cuda:0")
@@ -115,7 +143,7 @@ class ImageSegmentation(object):
                 # print(dice_score(predictions,targets))
                 end = time.time()
 
-                if batch_idx % 10 == 0:
+                if batch_idx % 100 == 0:
                     print('Batch Index : %d Loss : %.3f Dice Score : %.3f Time : %.3f seconds ' % (
                         batch_idx, np.mean(losses), np.mean(dice_loss), end - start))
 
@@ -159,13 +187,13 @@ class ImageSegmentation(object):
             break
         return
 
+if __name__ == '__main__':
 
 
-df = pd.read_csv('/content/gdrive/MyDrive/Project_Data/Carvan/train_masks.csv.zip')
-img_fol = '/content/gdrive/MyDrive/Project_Data/Carvan/train-128'
-mask_fol = '/content/gdrive/MyDrive/Project_Data/Carvan/train_masks-128'
+    df = pd.read_csv('/content/gdrive/MyDrive/Project_Data/Carvan/train_masks.csv.zip') # stored in google drive
+    img_fol = '/content/gdrive/MyDrive/Project_Data/Carvan/train-128'  # stored in google drive
+    mask_fol = '/content/gdrive/MyDrive/Project_Data/Carvan/train_masks-128'  # stored in google drive
 
-mod = smp.Unet("resnet18", encoder_weights="imagenet", classes=1, activation=None)
-Segmen = ImageSegmentation(mod, img_fol, mask_fol, df)
-Segmen.fit(epochs=30)
-
+    mod = smp.Unet("resnet18", encoder_weights="imagenet", classes=1, activation=None)
+    Segmen = ImageSegmentation(mod, img_fol, mask_fol, df)
+    Segmen.fit(epochs=10)
