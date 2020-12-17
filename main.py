@@ -1,15 +1,17 @@
 import cv2
 from matplotlib import pyplot as plt
 import numpy as np
-import pandas as pd
 import torch
 from sklearn.model_selection import train_test_split
-import segmentation_models_pytorch as smp
+#import segmentation_models_pytorch as smp
 import torchvision.transforms as transforms
 import torchvision.transforms.functional as TF
 import os
 import time
 import random
+import UNet
+
+
 
 '''
 #for loading the data from kaggle to colab to run over GPUs,
@@ -47,26 +49,29 @@ drive.mount('/content/gdrive')  # add the genetared key
 
 
 def CarDataloader(df, img_fol, mask_fol, batch_size):
-    df_train, df_valid = train_test_split(df, test_size=0.2)  # random_state=69)
+    """load train and validation data form respective datasets"""
 
+    df_train, df_valid = train_test_split(df, test_size=0.2)
     train_dataset = CarDataset(df_train, img_fol, mask_fol, 'train')
     valid_dataset = CarDataset(df_valid, img_fol, mask_fol, 'valid')
-
     train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size['train'], num_workers=16,
                                                    pin_memory=True, shuffle=True)
     valid_dataloader = torch.utils.data.DataLoader(valid_dataset, batch_size=batch_size['valid'], num_workers=16,
                                                    pin_memory=True, drop_last=True)
-
     return train_dataloader, valid_dataloader
 
 
 def dice_score(pred, targs):
+    """calculate the dice score"""
+
     # pred = (pred>0).float()
     pred = torch.sigmoid(pred)
     return 2. * (pred * targs).sum() / ((pred ** 2) + (targs ** 2)).sum()
 
 
 def transform(image, mask, phase):
+    """image transformations to apply"""
+
     mean, std = (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)
     to_tensor = transforms.ToTensor()
     image = to_tensor(image)
@@ -111,6 +116,8 @@ class CarDataset(torch.utils.data.Dataset):
 
 
 class ImageSegmentation(object):
+    """Main class to ttrain the model"""
+
     def __init__(self, model, img_fol, mask_fol, df):
         self.dataframe = df
         self.img_fol = img_fol
@@ -179,6 +186,8 @@ class ImageSegmentation(object):
             self.scheduler.step(epoch_loss)
 
     def predict(self):
+        """predictions"""
+
         for i, batch in enumerate(self.valid_dataloader):
             images, mask_target = batch
 
@@ -194,11 +203,11 @@ class ImageSegmentation(object):
 
 
 if __name__ == '__main__':
-    df = pd.read_csv('/content/gdrive/MyDrive/Project_Data/Carvan/train_masks.csv.zip')
+    df = pd.read_csv('/train_masks.csv')
     img_fol = '/content/gdrive/MyDrive/Project_Data/Carvan/train/train'
     mask_fol = '/content/gdrive/MyDrive/Project_Data/Carvan/train_masks_png'
 
     # mod = smp.Unet("resnet18", encoder_weights="imagenet", classes=1, activation=None)
-    mod = UNet(3, 1, False)
+    mod = UNet.UNet(3, 1, False)
     Segment = ImageSegmentation(mod, img_fol, mask_fol, df)
     Segment.fit(epochs=10)
