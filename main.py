@@ -5,8 +5,8 @@ import pandas as pd
 import torch
 from sklearn.model_selection import train_test_split
 import segmentation_models_pytorch as smp
-from albumentations import (HorizontalFlip, ShiftScaleRotate, Normalize, Resize, Compose, GaussNoise)
-from albumentations.pytorch import ToTensor
+import torchvision.transforms as transforms
+import torchvision.transforms.functional as TF
 import os
 import time
 import random
@@ -25,8 +25,10 @@ files.upload()  # upload the token file downloaded from setting in your kaggle s
 ! chmod 600 ~/.kaggle/kaggle.json
 ! kaggle datasets list
 ! kaggle competitions download -c 'Carvana-Image-Masking-Challenge'
+
+
 from google.colab import drive
-drive.mount('/content/gdrive')
+drive.mount('/content/gdrive')  # add the genetared key
 
 # select the file path accordingly 
 ! mkdir /content/gdrive/MyDrive/Project_Data/Carvan/test_hq
@@ -44,27 +46,14 @@ drive.mount('/content/gdrive')
 '''
 
 
-def get_transform(phase):
-    list_trans = []
-    mean, std = (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)
-
-    if phase == 'train':
-        list_trans.extend([HorizontalFlip(p=0.5)])
-
-    list_trans.extend(
-        [Normalize(mean=mean, std=std, p=1), ToTensor()])  # normalizing the data & then converting to tensors
-    list_trans = Compose(list_trans)
-    return list_trans
-
-
 def CarDataloader(df, img_fol, mask_fol, batch_size):
     df_train, df_valid = train_test_split(df, test_size=0.2)  # random_state=69)
 
     train_dataset = CarDataset(df_train, img_fol, mask_fol, 'train')
     valid_dataset = CarDataset(df_valid, img_fol, mask_fol, 'valid')
 
-    train_dataloader = torch.utils.data.DataLoader(train_dataset, shuffle=True, batch_size=batch_size['train'],
-                                                   num_workers=16, pin_memory=True)
+    train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size['train'], num_workers=16,
+                                                   pin_memory=True, shuffle=True)
     valid_dataloader = torch.utils.data.DataLoader(valid_dataset, batch_size=batch_size['valid'], num_workers=16,
                                                    pin_memory=True, drop_last=True)
 
@@ -77,6 +66,27 @@ def dice_score(pred, targs):
     return 2. * (pred * targs).sum() / ((pred ** 2) + (targs ** 2)).sum()
 
 
+def transform(image, mask, phase):
+    mean, std = (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)
+    to_tensor = transforms.ToTensor()
+    image = to_tensor(image)
+    mask = to_tensor(mask)
+
+    Norm = transforms.Normalize(mean=mean, std=std)
+    image = Norm(image)
+
+    if phase == 'train':
+        if random.random() > 0.5:
+            image = TF.hflip(image)
+            mask = TF.hflip(mask)
+
+    resize = transforms.Resize(size=(256, 256))
+    image = resize(image)
+    mask = resize(mask)
+
+    return image, mask
+
+
 class CarDataset(torch.utils.data.Dataset):
     def __init__(self, df, img_fol, mask_fol, phase):
         self.fname = df['img'].values.tolist()
@@ -84,7 +94,6 @@ class CarDataset(torch.utils.data.Dataset):
         self.img_fol = img_fol
         self.mask_fol = mask_fol
         self.phase = phase
-        self.transform = get_transform(phase)
 
     def __len__(self):
         return len(self.fname)
@@ -93,12 +102,11 @@ class CarDataset(torch.utils.data.Dataset):
         name = self.fname[idx]
         img_name_path = os.path.join(self.img_fol, name)
         mask_name_path = os.path.join(self.mask_fol, name)[:-4] + '_mask.png'
+
         img = cv2.imread(img_name_path)
         mask = cv2.imread(mask_name_path, cv2.IMREAD_GRAYSCALE)
-        augmentation = self.transform(image=img, mask=mask)
-        img_aug = augmentation['image']
-        mask_aug = augmentation['mask']
 
+        img_aug, mask_aug = transform(img, mask, self.phase)
         return img_aug, mask_aug
 
 
@@ -139,8 +147,6 @@ class ImageSegmentation(object):
                 self.optimizer.step()
                 losses.append(loss.item())
                 dice_loss.append(dice_score(predictions, targets).item())
-                # print(loss,end='---')
-                # print(dice_score(predictions,targets))
                 end = time.time()
 
                 if batch_idx % 100 == 0:
@@ -185,15 +191,14 @@ class ImageSegmentation(object):
                 ax2.imshow(np.squeeze(mask_target[pre]), cmap='gray')
                 plt.show()
             break
-        return
+
 
 if __name__ == '__main__':
+    df = pd.read_csv('/content/gdrive/MyDrive/Project_Data/Carvan/train_masks.csv.zip')
+    img_fol = '/content/gdrive/MyDrive/Project_Data/Carvan/train/train'
+    mask_fol = '/content/gdrive/MyDrive/Project_Data/Carvan/train_masks_png'
 
-
-    df = pd.read_csv('/content/gdrive/MyDrive/Project_Data/Carvan/train_masks.csv.zip') # stored in google drive
-    img_fol = '/content/gdrive/MyDrive/Project_Data/Carvan/train-128'  # stored in google drive
-    mask_fol = '/content/gdrive/MyDrive/Project_Data/Carvan/train_masks-128'  # stored in google drive
-
-    mod = smp.Unet("resnet18", encoder_weights="imagenet", classes=1, activation=None)
-    Segmen = ImageSegmentation(mod, img_fol, mask_fol, df)
-    Segmen.fit(epochs=10)
+    # mod = smp.Unet("resnet18", encoder_weights="imagenet", classes=1, activation=None)
+    mod = UNet(3, 1, False)
+    Segment = ImageSegmentation(mod, img_fol, mask_fol, df)
+    Segment.fit(epochs=10)
